@@ -23,6 +23,7 @@ import com.google.vrtoolkit.cardboard.HeadTransform;
 import com.google.vrtoolkit.cardboard.Viewport;
 
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.opengl.GLES20;
@@ -30,7 +31,10 @@ import android.opengl.GLUtils;
 import android.opengl.Matrix;
 import android.os.Bundle;
 import android.os.Vibrator;
+import android.provider.MediaStore;
 import android.util.Log;
+import android.widget.ImageView;
+import android.widget.Toast;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -63,6 +67,7 @@ public class MainActivity extends CardboardActivity implements CardboardView.Ste
 
   // We keep the light always position just above the user.
   private static final float[] LIGHT_POS_IN_WORLD_SPACE = new float[] { 0.0f, 2.0f, 0.0f, 1.0f };
+  static final int REQUEST_IMAGE_CAPTURE = 1;
 
   private final float[] lightPosInEyeSpace = new float[4];
 
@@ -186,10 +191,29 @@ public class MainActivity extends CardboardActivity implements CardboardView.Ste
 
 
     overlayView = (CardboardOverlayView) findViewById(R.id.overlay);
-    overlayView.show3DToast("Pull the magnet when you find an object.");
-    overlayView.show3DSplashImage();
+    //overlayView.show3DToast("Pull the magnet when you find an object.");
 
   }
+
+
+  private void dispatchTakePictureIntent() {
+    Intent takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+    if (takePictureIntent.resolveActivity(getPackageManager()) != null) {
+      startActivityForResult(takePictureIntent, REQUEST_IMAGE_CAPTURE);
+    }
+  }
+
+  @Override
+  protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+    if (requestCode == REQUEST_IMAGE_CAPTURE && resultCode == RESULT_OK) {
+      Bundle extras = data.getExtras();
+      Bitmap imageBitmap = (Bitmap) extras.get("data");
+      //mImageView.setImageBitmap(imageBitmap);
+      Bitmap resized = Bitmap.createScaledBitmap(imageBitmap,(int)(imageBitmap.getWidth()*0.7), (int)(imageBitmap.getHeight()*0.7), true);
+      overlayView.show3DSplashImage(resized);
+    }
+  }
+
 
   @Override
   public void onRendererShutdown() {
@@ -385,7 +409,6 @@ public class MainActivity extends CardboardActivity implements CardboardView.Ste
     float[] perspective = eye.getPerspective(Z_NEAR, Z_FAR);
     Matrix.multiplyMM(modelView, 0, view, 0, modelCube, 0);
     Matrix.multiplyMM(modelViewProjection, 0, perspective, 0, modelView, 0);
-    drawCube();
 
     // Set modelView for the floor, so we draw floor in the correct location
     Matrix.multiplyMM(modelView, 0, view, 0, modelFloor, 0);
@@ -398,37 +421,6 @@ public class MainActivity extends CardboardActivity implements CardboardView.Ste
   public void onFinishFrame(Viewport viewport) {
   }
 
-  /**
-   * Draw the cube.
-   *
-   * <p>We've set all of our transformation matrices. Now we simply pass them into the shader.
-   */
-  public void drawCube() {
-    GLES20.glUseProgram(cubeProgram);
-
-    GLES20.glUniform3fv(cubeLightPosParam, 1, lightPosInEyeSpace, 0);
-
-    // Set the Model in the shader, used to calculate lighting
-    GLES20.glUniformMatrix4fv(cubeModelParam, 1, false, modelCube, 0);
-
-    // Set the ModelView in the shader, used to calculate lighting
-    GLES20.glUniformMatrix4fv(cubeModelViewParam, 1, false, modelView, 0);
-
-    // Set the position of the cube
-    GLES20.glVertexAttribPointer(cubePositionParam, COORDS_PER_VERTEX, GLES20.GL_FLOAT,
-        false, 0, cubeVertices);
-
-    // Set the ModelViewProjection matrix in the shader.
-    GLES20.glUniformMatrix4fv(cubeModelViewProjectionParam, 1, false, modelViewProjection, 0);
-
-    // Set the normal positions of the cube, again for shading
-    GLES20.glVertexAttribPointer(cubeNormalParam, 3, GLES20.GL_FLOAT, false, 0, cubeNormals);
-    GLES20.glVertexAttribPointer(cubeColorParam, 4, GLES20.GL_FLOAT, false, 0,
-        isLookingAtObject() ? cubeFoundColors : cubeColors);
-
-    GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, 36);
-    checkGLError("Drawing cube");
-  }
 
   /**
    * Draw the floor.
@@ -464,26 +456,11 @@ public class MainActivity extends CardboardActivity implements CardboardView.Ste
   public void onCardboardTrigger() {
     Log.i(TAG, "onCardboardTrigger");
 
-    if (isLookingAtObject()) {
-      score++;
-      overlayView.show3DToast("Found it! Look around for another one.\nScore = " + score);
-      hideObject();
-    } else {
-      overlayView.show3DToast("Look around to find the object!");
-    }
+    dispatchTakePictureIntent();
 
     // Always give user feedback.
     vibrator.vibrate(50);
   }
-
-
-
-
-
-
-
-
-
 
   public void SetupImage()
   {
@@ -536,12 +513,6 @@ public class MainActivity extends CardboardActivity implements CardboardView.Ste
   }
 
 
-
-
-
-
-
-
   /**
    * Find a new random position for the object.
    *
@@ -571,22 +542,4 @@ public class MainActivity extends CardboardActivity implements CardboardView.Ste
     Matrix.translateM(modelCube, 0, posVec[0], newY, posVec[2]);
   }
 
-  /**
-   * Check if user is looking at object by calculating where the object is in eye-space.
-   *
-   * @return true if the user is looking at the object.
-   */
-  private boolean isLookingAtObject() {
-    float[] initVec = { 0, 0, 0, 1.0f };
-    float[] objPositionVec = new float[4];
-
-    // Convert object space to camera space. Use the headView from onNewFrame.
-    Matrix.multiplyMM(modelView, 0, headView, 0, modelCube, 0);
-    Matrix.multiplyMV(objPositionVec, 0, modelView, 0, initVec, 0);
-
-    float pitch = (float) Math.atan2(objPositionVec[1], -objPositionVec[2]);
-    float yaw = (float) Math.atan2(objPositionVec[0], -objPositionVec[2]);
-
-    return Math.abs(pitch) < PITCH_LIMIT && Math.abs(yaw) < YAW_LIMIT;
-  }
 }
