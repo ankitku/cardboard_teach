@@ -26,10 +26,13 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.hardware.Camera;
+import android.net.Uri;
 import android.opengl.GLES20;
 import android.opengl.GLUtils;
 import android.opengl.Matrix;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Vibrator;
 import android.provider.MediaStore;
 import android.util.Log;
@@ -37,6 +40,9 @@ import android.widget.ImageView;
 import android.widget.Toast;
 
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -44,6 +50,8 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.ShortBuffer;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
 import javax.microedition.khronos.egl.EGLConfig;
 
@@ -60,14 +68,16 @@ public class MainActivity extends CardboardActivity implements CardboardView.Ste
   private static final float CAMERA_Z = 0.01f;
   private static final float TIME_DELTA = 0.3f;
 
-  private static final float YAW_LIMIT = 0.12f;
-  private static final float PITCH_LIMIT = 0.12f;
+  Camera mCamera;
+  public static final int MEDIA_TYPE_IMAGE = 1;
+  public static final int MEDIA_TYPE_VIDEO = 2;
+
 
   private static final int COORDS_PER_VERTEX = 3;
 
   // We keep the light always position just above the user.
   private static final float[] LIGHT_POS_IN_WORLD_SPACE = new float[] { 0.0f, 2.0f, 0.0f, 1.0f };
-  static final int REQUEST_IMAGE_CAPTURE = 1;
+  private static int TAKE_PICTURE = 1;
 
   private final float[] lightPosInEyeSpace = new float[4];
 
@@ -190,6 +200,8 @@ public class MainActivity extends CardboardActivity implements CardboardView.Ste
     vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
 
 
+    mCamera = getCameraInstance();
+
     overlayView = (CardboardOverlayView) findViewById(R.id.overlay);
     //overlayView.show3DToast("Pull the magnet when you find an object.");
 
@@ -197,21 +209,90 @@ public class MainActivity extends CardboardActivity implements CardboardView.Ste
 
 
   private void dispatchTakePictureIntent() {
-    Intent takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-    if (takePictureIntent.resolveActivity(getPackageManager()) != null) {
-      startActivityForResult(takePictureIntent, REQUEST_IMAGE_CAPTURE);
+    //Intent takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+    //if (takePictureIntent.resolveActivity(getPackageManager()) != null) {
+    //  startActivityForResult(takePictureIntent, TAKE_PICTURE);
+
+    mCamera.takePicture(null,null,mPicture);
     }
+
+  private Camera.PictureCallback mPicture = new Camera.PictureCallback() {
+
+    @Override
+    public void onPictureTaken(byte[] data, Camera camera) {
+
+      File pictureFile = getOutputMediaFile(MEDIA_TYPE_IMAGE);
+      if (pictureFile == null){
+        Log.d(TAG, "Error creating media file, check storage permissions: " );
+        return;
+      }
+
+      try {
+        FileOutputStream fos = new FileOutputStream(pictureFile);
+        Log.d(TAG,data.toString());
+        fos.write(data);
+        fos.close();
+      } catch (FileNotFoundException e) {
+        Log.d(TAG, "File not found: " + e.getMessage());
+      } catch (IOException e) {
+        Log.d(TAG, "Error accessing file: " + e.getMessage());
+      }
+    }
+  };
+
+
+
+  /** A safe way to get an instance of the Camera object. */
+  public static Camera getCameraInstance(){
+    Camera c = null;
+    try {
+      c = Camera.open(); // attempt to get a Camera instance
+    }
+    catch (Exception e){
+      Log.d(TAG,">>>>>>>>>>>>>>>>>>> no camera!!!!!");
+    }
+    return c; // returns null if camera is unavailable
   }
 
-  @Override
-  protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-    if (requestCode == REQUEST_IMAGE_CAPTURE && resultCode == RESULT_OK) {
-      Bundle extras = data.getExtras();
-      Bitmap imageBitmap = (Bitmap) extras.get("data");
-      //mImageView.setImageBitmap(imageBitmap);
-      Bitmap resized = Bitmap.createScaledBitmap(imageBitmap,(int)(imageBitmap.getWidth()*0.7), (int)(imageBitmap.getHeight()*0.7), true);
-      overlayView.show3DSplashImage(resized);
+
+
+  /** Create a file Uri for saving an image or video */
+  private static Uri getOutputMediaFileUri(int type){
+    return Uri.fromFile(getOutputMediaFile(type));
+  }
+
+  /** Create a File for saving an image or video */
+  private static File getOutputMediaFile(int type){
+    // To be safe, you should check that the SDCard is mounted
+    // using Environment.getExternalStorageState() before doing this.
+
+    File mediaStorageDir = new File(Environment.getExternalStoragePublicDirectory(
+            Environment.DIRECTORY_PICTURES), "MyCameraApp");
+    // This location works best if you want the created images to be shared
+    // between applications and persist after your app has been uninstalled.
+
+    // Create the storage directory if it does not exist
+    if (! mediaStorageDir.exists()){
+      if (! mediaStorageDir.mkdirs()){
+        Log.d("MyCameraApp", "failed to create directory");
+        return null;
+      }
     }
+
+    // Create a media file name
+    String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+    File mediaFile;
+    if (type == MEDIA_TYPE_IMAGE){
+      mediaFile = new File(mediaStorageDir.getPath() + File.separator +
+              "IMG_"+ timeStamp + ".jpg");
+    } else if(type == MEDIA_TYPE_VIDEO) {
+      mediaFile = new File(mediaStorageDir.getPath() + File.separator +
+              "VID_"+ timeStamp + ".mp4");
+    } else {
+      return null;
+    }
+
+    return mediaFile;
   }
 
 
@@ -240,31 +321,6 @@ public class MainActivity extends CardboardActivity implements CardboardView.Ste
     SetupImage();
 
     GLES20.glClearColor(0.1f, 0.1f, 0.1f, 0.5f); // Dark background so text shows up well.
-
-    ByteBuffer bbVertices = ByteBuffer.allocateDirect(WorldLayoutData.CUBE_COORDS.length * 4);
-    bbVertices.order(ByteOrder.nativeOrder());
-    cubeVertices = bbVertices.asFloatBuffer();
-    cubeVertices.put(WorldLayoutData.CUBE_COORDS);
-    cubeVertices.position(0);
-
-    ByteBuffer bbColors = ByteBuffer.allocateDirect(WorldLayoutData.CUBE_COLORS.length * 4);
-    bbColors.order(ByteOrder.nativeOrder());
-    cubeColors = bbColors.asFloatBuffer();
-    cubeColors.put(WorldLayoutData.CUBE_COLORS);
-    cubeColors.position(0);
-
-    ByteBuffer bbFoundColors = ByteBuffer.allocateDirect(
-        WorldLayoutData.CUBE_FOUND_COLORS.length * 4);
-    bbFoundColors.order(ByteOrder.nativeOrder());
-    cubeFoundColors = bbFoundColors.asFloatBuffer();
-    cubeFoundColors.put(WorldLayoutData.CUBE_FOUND_COLORS);
-    cubeFoundColors.position(0);
-
-    ByteBuffer bbNormals = ByteBuffer.allocateDirect(WorldLayoutData.CUBE_NORMALS.length * 4);
-    bbNormals.order(ByteOrder.nativeOrder());
-    cubeNormals = bbNormals.asFloatBuffer();
-    cubeNormals.put(WorldLayoutData.CUBE_NORMALS);
-    cubeNormals.position(0);
 
     // make a floor
     ByteBuffer bbFloorVertices = ByteBuffer.allocateDirect(WorldLayoutData.FLOOR_COORDS.length * 4);
@@ -530,7 +586,7 @@ public class MainActivity extends CardboardActivity implements CardboardView.Ste
     objectDistance = (float) Math.random() * 15 + 5;
     float objectScalingFactor = objectDistance / oldObjectDistance;
     Matrix.scaleM(rotationMatrix, 0, objectScalingFactor, objectScalingFactor,
-        objectScalingFactor);
+            objectScalingFactor);
     Matrix.multiplyMV(posVec, 0, rotationMatrix, 0, modelCube, 12);
 
     // Now get the up or down angle, between -20 and 20 degrees.
